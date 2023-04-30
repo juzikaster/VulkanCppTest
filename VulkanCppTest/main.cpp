@@ -1,3 +1,4 @@
+#pragma region Pre-processing
 // Enable the WSI extensions
 #if defined(__ANDROID__)
 #define VK_USE_PLATFORM_ANDROID_KHR
@@ -9,6 +10,7 @@
 
 // Tell SDL not to mess with main()
 #define SDL_MAIN_HANDLED
+#pragma endregion
 
 #include <glm/glm.hpp>
 #include <SDL2/SDL.h>
@@ -18,9 +20,12 @@
 
 #include <iostream>
 #include <vector>
+#include <cstring>
+#include <optional>
 
 
 class TriangleApp {
+#pragma region public
 public:
     void run() {
         initSDL();
@@ -29,8 +34,33 @@ public:
         mainLoop();
         cleanup();
     }
+#pragma endregion
 
+#pragma region private
 private:
+#pragma region Structs
+    struct QueueFamilyIndices {
+        std::optional<uint32_t> graphicsFamily;
+
+        bool isComplete() {
+            return graphicsFamily.has_value();
+        }
+    };
+#pragma endregion
+#pragma region Constants
+
+    const std::vector<const char*> validationLayers = {
+        "VK_LAYER_KHRONOS_validation"
+    };
+
+#ifdef NDEBUG
+    const bool enableValidationLayers = false;
+#else
+    const bool enableValidationLayers = true;
+#endif // NDEBUG
+
+#pragma endregion
+
     SDL_Window* window;
     unsigned extension_count;
     std::vector<const char*> extensions;
@@ -39,6 +69,9 @@ private:
     vk::Instance instance;
     VkSurfaceKHR c_surface;
     vk::SurfaceKHR surface;
+    VkDevice device;
+    
+#pragma region SDL
 
     void initSDL() {
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -72,8 +105,19 @@ private:
         layers.push_back("VK_LAYER_KHRONOS_validation");
 #endif
     }
+#pragma endregion
+
+#pragma region Vulkan
 
     void initVulkan() {
+        if (enableValidationLayers && !checkValidationLayerSupport())
+            throw std::runtime_error("Validation layers not available!");
+        createInstance();
+        pickPhysicalDevice();
+        createLogicalDevice();
+    }
+
+    void createInstance() {
         // vk::ApplicationInfo allows the programmer to specifiy some basic information about the
         // program, which can be useful for layers and tools to provide more debug information.
         vk::ApplicationInfo appInfo = vk::ApplicationInfo()
@@ -93,6 +137,13 @@ private:
             .setEnabledLayerCount(static_cast<uint32_t>(layers.size()))
             .setPpEnabledLayerNames(layers.data());
 
+        if (enableValidationLayers) {
+            instInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            instInfo.ppEnabledLayerNames = validationLayers.data();
+        } else {
+            instInfo.enabledLayerCount = 0;
+        }
+
         try {
             instance = vk::createInstance(instInfo);
         }
@@ -107,6 +158,85 @@ private:
         }
     }
 
+    void pickPhysicalDevice() {
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+        if (deviceCount == 0) 
+            throw std::runtime_error("Failed to find GPU with Vulkan support!");
+        
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+        for (const auto& device : devices) {
+            if (isDeviceSuitable(device)) {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+            throw std::runtime_error("Failed to find suitable GPU!");
+    }
+
+    void createLogicalDevice() {
+
+    }
+
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
+        QueueFamilyIndices indices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) 
+                indices.graphicsFamily = i;
+
+            if (indices.isComplete())
+                break;
+            i++;
+        }
+        return indices;
+    }
+
+    bool isDeviceSuitable(VkPhysicalDevice device) {
+        QueueFamilyIndices indices = findQueueFamilies(device);
+
+        return indices.isComplete();
+    }
+
+    bool checkValidationLayerSupport() {
+        uint32_t layerCount;
+        vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+        std::vector<VkLayerProperties> availableLayers(layerCount);
+        vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+        bool layerFound;
+        for (const char* layerName : validationLayers) {
+            layerFound = false;
+
+            for (const auto& layerProperties : availableLayers) {
+                if (strcmp(layerName, layerProperties.layerName) == 0) {
+                    layerFound = true;
+                    break;
+                }
+            }
+
+            if (!layerFound)
+                return false;
+        }
+        return true;
+    }
+
+#pragma endregion
     void mainLoop() {
         bool stillRunning = true;
         while (stillRunning) {
@@ -136,11 +266,11 @@ private:
         SDL_Quit();
         instance.destroy();
     }
+#pragma endregion
 };
 
 int main()
 {   
-
     TriangleApp app;
 
     try {
